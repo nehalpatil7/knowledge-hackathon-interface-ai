@@ -35,6 +35,7 @@ class Query:
     subject: list[str] = field(default_factory=list)    # words a prose answer should cover
     answer_type: Optional[str] = None                   # hours | count | date | address | phone | money | percent
     verbish: set = field(default_factory=set)           # -ing / -ed words (rarely name a product)
+    out_of_scope: Optional[str] = None                  # prediction | personal_account | market_data
     unknown: list = field(default_factory=list)         # words the website never uses (after spell-fixing)
     count_noun: Optional[str] = None                    # "how many <branches>"
     proper: list[str] = field(default_factory=list)     # Capitalised names in the question
@@ -124,6 +125,21 @@ def parse_question(q: str) -> Query:
     else:
         qu.intent = "fact"
 
+    # ------------------------------------------------------------------ questions a website can't answer
+    if re.search(r"\b(will|going to|gonna|expect(?:ed)? to)\b.*\b(rates?|apr|apy|dividends?|prices?|raise|lower|"
+                 r"go (?:up|down)|increase|decrease|drop|rise)\b|\b(forecast|predict\w*|projection|outlook)\b|"
+                 r"\b(rates?|apr|apy)\b.*\bnext (?:week|month|quarter|year)\b", norm):
+        qu.out_of_scope = "prediction"
+    elif re.search(r"\bwhy (?:was|is|did|has|were) my\b|"
+                   r"\b(?:what(?:'s| is| are)?|check|see) my (?:current |available |account )*"
+                   r"(?:balance|account number|credit score|credit limit|payment due|loan status|transactions?)\b|"
+                   r"\bmy (?:recent|last|latest) (?:transactions?|deposits?|payments?|statements?)\b|"
+                   r"\b(?:has|did|have) my\b.*\b(?:cleared|posted|gone through|go through|been approved)\b", norm):
+        qu.out_of_scope = "personal_account"
+    elif re.search(r"\b(?:stock|share|bitcoin|crypto(?:currency)?|gold|oil) price\b|\bprice of (?:bitcoin|gold|oil)\b|"
+                   r"\bticker\b|\bmarket cap\b", norm):
+        qu.out_of_scope = "market_data"
+
     # ------------------------------------------------------------------ "as of" mentioned in text
     m = re.search(r"\b(" + "|".join(sorted(MONTH_NAMES, key=len, reverse=True)) + r")\.?,?\s+(20\d\d)\b", norm)
     if m:
@@ -137,7 +153,8 @@ def parse_question(q: str) -> Query:
                                          "biggest", "smallest", "cheapest", "lowest", "change", "changed",
                                          "changing", "increase", "decrease", "previous", "previously", "history",
                                          "before", "prior", "raise", "raised", "lower", "lowered", "went")}
-    date_words = set(MONTH_NAMES) | {"year", "month", "week", "day", "ago", "last", "since"}
+    date_words = set(MONTH_NAMES) | {"year", "month", "week", "day", "ago", "last", "since", "today", "tomorrow",
+                                     "yesterday", "tonight", "weekend", "morning", "afternoon", "evening"}
     # participles / gerunds ("thinking", "used", "planning") describe the member, not the product
     verbish = {stem(w) for w in re.findall(r"[a-z]+", norm) if re.search(r"(ing|ed)$", w) and len(w) >= 4}
     verbish |= {"new", "old", "used"}

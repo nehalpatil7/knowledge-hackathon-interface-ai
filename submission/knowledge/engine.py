@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from .parse import TableRow, expired_on
 from .query import Query, parse_question
 from .store import AUTHORITY, PageCache, PageRec, SnapshotIndex, Unit, classify, iso_date
-from .text import SYN, tokens
+from .text import DOMAIN, SYN, tokens
 
 YESNO_RE = re.compile(r"\s*(do|does|did|is|are|can|will|should|must|am)\b(?!.*\b(what|how much|which)\b)", re.I)
 
@@ -256,7 +256,27 @@ class KnowledgeEngine:
         self._answers[key] = res
         return res
 
+    def _out_of_scope(self, q: Query, snap: SnapshotIndex, when_asked: Optional[date]) -> bool:
+        """Questions no snapshot of a website can answer: predictions, one member's own account data,
+        live market prices, dates after the newest snapshot asked as a forecast, and questions with nothing
+        to do with a credit union - judged by generic banking words, topic words learned from the site's own
+        page titles / headings / captions, and rare names the site uses."""
+        if q.out_of_scope:
+            return True
+        if when_asked and when_asked > self.snaps[-1].taken_on and re.search(r"\b(will|be in|going to)\b", q.norm):
+            return True
+        if set(q.toks) & (DOMAIN | snap.site_names):
+            return False                       # a banking concept, or the organisation itself
+        rare = max(0.02 * len(snap.passages), 5)     # "specific": on < 2% of passages (at least 5 on tiny sites)
+        if any(t in snap.topics and snap.passage_index.df(t) < rare for t in q.subject):
+            return False                       # a product / topic the site has a page or section for
+                                               # (specific ones only: "Dubuque" is in every dateline)
+        # a rare name the site uses (a branch town, a program) also keeps the question in scope
+        return not any(0 < snap.passage_index.df(t) < rare for t in q.proper)
+
     def _answer(self, q: Query, snap: SnapshotIndex, dated: bool, when_asked: Optional[date] = None) -> Result:
+        if self._out_of_scope(q, snap, when_asked):
+            return Result(REFUSAL, confident=False)
         res = None
         if q.intent == "link":
             res = self.answer_link(q, snap)
@@ -673,6 +693,8 @@ class KnowledgeEngine:
             head = set(tokens(u.obj.heading)) - title
             hcov = (sum(w for t, w in sw if self._covered(t, head)) / sw_total) if subject and head else 0.0
             auth = PASSAGE_AUTH.get(p.category, 0.8)
+            if howto and p.category in ("news", "blog"):
+                auth *= 0.6
             if howto and p.category == "legal":
                 auth *= 0.4                                # "how do I…" isn't answered by contract fine print
             if p.is_business != ("business" in q.flags):

@@ -166,6 +166,20 @@ class SnapshotIndex:
             for t in set(u.toks):
                 vocab[t] += 1
         self.vocab = dict(vocab)
+        # topic words learned from the site itself: titles, headings and table captions of its own
+        # (non-blog, non-news) pages - product and service names, so new content is covered automatically
+        self.topics: set[str] = set()
+        for p in pages:
+            if p.category in ("rate_sheet", "product", "site", "document", "landing"):
+                self.topics.update(tokens(p.title + " " + p.parsed.h1))
+                self.topics.update(t for ps in p.parsed.passages for t in tokens(ps.heading))
+                self.topics.update(t for r in p.parsed.rows for t in tokens(r.caption))
+        # the organisation's own name: the word that appears in most page titles ("… | Dupaco")
+        title_counts: dict[str, int] = defaultdict(int)
+        for p in pages:
+            for t in set(tokens(p.title)):
+                title_counts[t] += 1
+        self.site_names = {t for t, c in title_counts.items() if c > 0.5 * max(1, len(pages)) and len(t) > 3}
 
 
 class PageCache:

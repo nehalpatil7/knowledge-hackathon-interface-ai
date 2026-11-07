@@ -185,6 +185,36 @@ class AnswerTests(unittest.TestCase):
         self.assertEqual(branches[0].resolution, "22")
 
 
+NEW_PRODUCT = """# Pawprint Pet Protection
+
+## Pawprint Pet Protection
+
+Pawprint Pet Protection covers vet visits for your dog or cat for $18 a month.
+"""
+
+
+class ScopeTests(unittest.TestCase):
+    """The in-scope check learns topics from the site itself, so new content is covered without code changes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.ks = build(snapshot("01_2026-09-28_latest", "2026-09-28", [
+            ("https://example.test/rates", "Rates", RATES_V1),
+            ("https://example.test/personal/pawprint", "Pawprint Pet Protection | Example CU", NEW_PRODUCT),
+            ("https://example.test/newsroom/opens-branch", "Opens branch", NEWS_OLD),
+        ]))
+
+    def test_new_product_is_in_scope_without_code_changes(self):
+        a = self.ks.answer("What does Pawprint cover?")
+        self.assertTrue(a.confident)
+        self.assertIn("vet visits", a.text)
+
+    def test_off_topic_prediction_and_personal_questions_are_refused(self):
+        for q in ("What's the weather tomorrow?", "Will certificate rates go up next month?",
+                  "What is my current account balance?", "What's the Bitcoin price today?"):
+            self.assertFalse(self.ks.answer(q).confident, q)
+
+
 class HarnessSelftest(unittest.TestCase):
     """The tiny example site that ships with the harness (a different credit union)."""
 

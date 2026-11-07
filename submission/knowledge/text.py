@@ -122,3 +122,19 @@ STOP_S = {stem(w) for w in STOP} | STOP
 GENERIC_S = {stem(w) for w in GENERIC} | GENERIC
 CONVERSATIONAL_S = {stem(w) for w in CONVERSATIONAL} | CONVERSATIONAL
 SYN = {stem(k): [stem(x) for x in v] for k, v in SYNONYMS.items()}
+
+
+# Generic banking concepts (not this site's product names - those are learned from page titles,
+# headings and table captions at ingest, so new products are covered automatically). A question with
+# none of these, no learned topic word and no rare name the site uses is out of scope.
+DOMAIN = {stem(w) for w in """
+rate rates apr apy yield dividend dividends interest account accounts checking savings saving certificate
+certificates cd cds ira iras roth loan loans mortgage mortgages refinance refi heloc equity card cards visa
+debit credit atm atms branch branches lobby drive hours hour open close closed closing member members membership
+join fee fees deposit deposits withdraw withdrawal transfer transfers wire routing aba swift pin statement statements
+online mobile app wallet wallets pay payment payments check checks insurance auto car truck vehicle vehicles boat rv
+motorcycle home homebuyer business money market balance balances minimum tier term phone number call address
+contact located location locations headquartered headquarters employees employee counties county award grant
+program programs scholarship notary safe coin overdraft budget jumbo cash advance late limit apply application
+borrow lend lending bank banking teller service services link url website locator
+""".split()}
