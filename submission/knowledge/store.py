@@ -55,10 +55,10 @@ def classify(url: str) -> str:
         return "news"
     if path.startswith("/learn") or re.match(r"^/\d{4}/\d{2}/", path) or path.startswith("/business/resources/"):
         return "blog"
+    if re.search(r"privacy|disclosure|terms|conditions|agreement", path):
+        return "legal"                  # contract fine print (also /hubfs/*-terms-conditions.pdf)
     if path.startswith("/hubfs"):
         return "document"
-    if "privacy" in path or "disclosure" in path:
-        return "legal"
     if LANDING_RE.search(path.lstrip("/")) or LANDING_RE.search(path):
         return "landing"
     if path.startswith("/personal") or path.startswith("/business") or path.startswith("/savings") \

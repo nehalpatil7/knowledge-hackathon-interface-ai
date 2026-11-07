@@ -673,8 +673,8 @@ class KnowledgeEngine:
             head = set(tokens(u.obj.heading)) - title
             hcov = (sum(w for t, w in sw if self._covered(t, head)) / sw_total) if subject and head else 0.0
             auth = PASSAGE_AUTH.get(p.category, 0.8)
-            if howto and p.category in ("news", "blog"):
-                auth *= 0.6
+            if howto and p.category == "legal":
+                auth *= 0.4                                # "how do I…" isn't answered by contract fine print
             if p.is_business != ("business" in q.flags):
                 auth *= 0.6                                # personal vs business is a different product
             if howto and action and action not in u.ctx_toks:
