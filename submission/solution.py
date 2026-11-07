@@ -59,7 +59,11 @@ class DupacoKnowledge:
 
     def conflicts(self):
         out = []
-        for c in self.engine.conflicts():
+        try:
+            found = self.engine.conflicts()
+        except Exception:
+            found = []
+        for c in found:
             out.append(Conflict(topic=c["topic"], values=c["values"],
                                 sources=[Source(url=u, snapshot_id=s) for u, s in c["sources"]],
                                 resolution=c.get("resolution"), reason=c.get("reason")))

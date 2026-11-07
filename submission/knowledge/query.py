@@ -190,7 +190,9 @@ def parse_question(q: str) -> Query:
     if qu.answer_type == "count":
         qu.subject = [t for t in qu.subject if t not in ("number", "total", "operat")]
 
-    words = re.findall(r"[A-Za-z][A-Za-z'’$]+", q)
+    letters = [c for c in q if c.isalpha()]
+    shouting = letters and sum(c.isupper() for c in letters) > 0.6 * len(letters)   # ALL CAPS: no name signal
+    words = [] if shouting else re.findall(r"[A-Za-z][A-Za-z'’$]+", q)
     for i, w in enumerate(words):
         if i > 0 and w[0].isupper() and w.lower() not in STOP and len(w) > 2:
             lw = tokens(w)

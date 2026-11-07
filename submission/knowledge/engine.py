@@ -7,7 +7,7 @@ import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -205,13 +205,31 @@ class KnowledgeEngine:
 
     # ------------------------------------------------------------------ ingest
     def ingest(self, snapshot_id: str, taken_on: str, pages) -> None:
-        recs = []
-        for p in pages:
-            cat = classify(p.url)
-            parsed = self.cache.get(p.markdown or "", p.title or "")
-            rec = PageRec(url=p.url, title=p.title or "", category=cat, authority=AUTHORITY[cat],
-                          fetched=iso_date(p.fetched_at), parsed=parsed)
-            recs.append(rec)
+        """Index one snapshot. Malformed input degrades gracefully: a page that can't be parsed is skipped,
+        a missing / bad date is recovered from the snapshot id or the pages' fetch dates, and the engine's
+        state only changes once the new index is fully built."""
+        snapshot_id = str(snapshot_id or f"snapshot_{len(self.snaps) + 1:02d}")
+        recs, seen = [], {}
+        for p in pages or []:
+            try:
+                url = str(getattr(p, "url", "") or "").strip()
+                if not url:
+                    continue
+                cat = classify(url)
+                title = str(getattr(p, "title", "") or "")
+                markdown = getattr(p, "markdown", "") or ""
+                if isinstance(markdown, bytes):
+                    markdown = markdown.decode("utf-8", "replace")
+                parsed = self.cache.get(str(markdown), title)
+                seen[url] = PageRec(url=url, title=title, category=cat, authority=AUTHORITY[cat],
+                                    fetched=iso_date(getattr(p, "fetched_at", None)), parsed=parsed)
+            except Exception:                  # one broken page must not lose the whole snapshot
+                continue
+        recs = list(seen.values())             # duplicate URLs in one crawl: the last copy wins
+        taken = (iso_date(taken_on) or iso_date(re.search(r"\d{4}-\d{2}-\d{2}", snapshot_id).group(0)
+                                                if re.search(r"\d{4}-\d{2}-\d{2}", snapshot_id) else None)
+                 or max((r.fetched for r in recs if r.fetched), default=None)
+                 or ((self.snaps[-1].taken_on + timedelta(days=1)) if self.snaps else date.today()))
         # A page that wasn't re-crawled this time is still part of what we know (its newest copy), but it
         # ranks below pages seen in this crawl.
         present = {r.url for r in recs}
@@ -220,14 +238,18 @@ class KnowledgeEngine:
                 recs.append(PageRec(url=old.url, title=old.title, category=old.category,
                                     authority=round(old.authority * 0.85, 3), fetched=old.fetched,
                                     parsed=old.parsed, carried=True))
+        index = SnapshotIndex(snapshot_id, taken, recs)   # build fully before touching engine state
         for r in recs:
             if not r.carried:
                 self._last_seen[r.url] = r
-        self.snaps.append(SnapshotIndex(snapshot_id, iso_date(taken_on), recs))
-        self.snaps.sort(key=lambda s: s.taken_on)
+        self.snaps = [s for s in self.snaps if s.snapshot_id != snapshot_id] + [index]   # re-ingest replaces
+        self.snaps.sort(key=lambda s: (s.taken_on, s.snapshot_id))
         self._answers.clear()
         self._conflicts = None
-        self.conflict_index()          # precompute (ingest is untimed; keeps answers fast)
+        try:
+            self.conflict_index()      # precompute (ingest is untimed; keeps answers fast)
+        except Exception:
+            self._conflicts = {"by_row": {}, "list": [], "timelines": {}}
 
     def snapshot_for(self, when: Optional[date]) -> SnapshotIndex:
         if when is None:
@@ -239,14 +261,24 @@ class KnowledgeEngine:
         return best or self.snaps[0]
 
     # ------------------------------------------------------------------ answer
-    def answer(self, question: str, as_of: Optional[str] = None) -> Result:
+    MAX_QUESTION = 1000                       # characters; longer input is truncated (keeps answers < 2 s)
+
+    def answer(self, question, as_of=None) -> Result:
         if not self.snaps:
             return Result(REFUSAL, confident=False)
-        q = parse_question(question)
-        when = iso_date(as_of) if as_of else q.asked_date
-        snap = self.snapshot_for(when)
-        q = self._spell_fix(q, snap)
-        key = (" ".join(sorted(set(q.toks))), snap.snapshot_id)
+        if isinstance(question, bytes):
+            question = question.decode("utf-8", "replace")
+        question = " ".join(str(question or "").split())[:self.MAX_QUESTION]
+        if not question:
+            return Result(REFUSAL, confident=False)
+        try:
+            q = parse_question(question)
+            when = iso_date(as_of) or (None if as_of else q.asked_date)   # unparseable as_of -> latest
+            snap = self.snapshot_for(when)
+            q = self._spell_fix(q, snap)
+        except Exception:
+            return Result(REFUSAL, confident=False)
+        key = (" ".join(sorted(set(q.toks))), snap.snapshot_id, when is not None, when and when < self.snaps[0].taken_on)
         if key in self._answers:
             return self._answers[key]
         try:

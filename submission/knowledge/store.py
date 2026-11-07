@@ -23,7 +23,7 @@ import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -197,8 +197,24 @@ class PageCache:
         return pp
 
 
-def iso_date(s: str) -> Optional[date]:
-    try:
-        return date.fromisoformat((s or "")[:10])
-    except ValueError:
+def iso_date(s) -> Optional[date]:
+    """Lenient date parsing: date / datetime objects, '2026-05-31', '2026-05-31T10:00:00Z', '05/31/2026',
+    'May 31, 2026', 20260531. Anything unparseable -> None (never raises)."""
+    if s is None or s == "":
         return None
+    if isinstance(s, datetime):
+        return s.date()
+    if isinstance(s, date):
+        return s
+    if isinstance(s, int) and 19000101 <= s <= 29991231:
+        s = str(s)
+        s = f"{s[:4]}-{s[4:6]}-{s[6:]}"
+    if not isinstance(s, str):
+        return None
+    s = s.strip()
+    try:
+        return date.fromisoformat(s[:10])
+    except ValueError:
+        pass
+    from .parse import any_date
+    return any_date(s[:40])

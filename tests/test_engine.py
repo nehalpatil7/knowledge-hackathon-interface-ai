@@ -215,6 +215,44 @@ class ScopeTests(unittest.TestCase):
             self.assertFalse(self.ks.answer(q).confident, q)
 
 
+class MalformedInputTests(unittest.TestCase):
+    """Bad input must never crash the run or poison later answers."""
+
+    def test_answer_and_conflicts_before_ingest(self):
+        ks = solution.build()
+        self.assertFalse(ks.answer("What is the 12 month CD rate?").confident)
+        self.assertEqual(ks.conflicts(), [])
+
+    def test_bad_snapshots_and_pages_then_a_good_one(self):
+        ks = solution.build()
+        ks.ingest(Snapshot("00_empty", "2026-05-01", []))
+        ks.ingest(Snapshot("00_bad_date", "not-a-date", [Page("https://example.test/x", None, None, None)]))
+        ks.ingest(Snapshot("00_no_date", None, [Page("", "", "", ""), Page("not a url", "T", "| a | b\n|---\n|||", "x")]))
+        ks.ingest(Snapshot("00_dupes", "2026-05-03", [Page("https://example.test/d", "D", "# one", "x"),
+                                                       Page("https://example.test/d", "D", "# two", "x")]))
+        ks.ingest(snapshot("01_2026-05-12_base", "2026-05-12", [("https://example.test/rates", "Rates", RATES_V1)]))
+        self.assertIn("2.90%", ks.answer("What is the 12 month certificate APY?").text)
+        self.assertIsInstance(ks.conflicts(), list)
+
+    def test_malformed_questions(self):
+        ks = build(snapshot("01_2026-05-12_base", "2026-05-12", [("https://example.test/rates", "Rates", RATES_V1)]))
+        for q in ("", "   ", None, 12345, b"12 month certificate rate", "?!?!$$%%", "'; DROP TABLE rates; --",
+                  "rate (.*) [12 month] ++?? \\d", "what is the rate " * 6000):
+            a = ks.answer(q)
+            self.assertIsInstance(a.text, str, repr(q)[:40])
+        self.assertIn("2.90%", ks.answer("WHAT IS THE 12 MONTH CERTFICATE APY").text)   # all caps + typo
+
+    def test_malformed_and_alternative_as_of(self):
+        from datetime import date, datetime
+        ks = build(snapshot("01_2026-05-12_base", "2026-05-12", [("https://example.test/rates", "Rates", RATES_V1)]),
+                   snapshot("02_2026-09-28_latest", "2026-09-28", [("https://example.test/rates", "Rates", RATES_V2)]))
+        q = "What is the 12 month certificate APY?"
+        for as_of in ("2026-05-31", "2026-05-31T10:00:00Z", "05/31/2026", date(2026, 5, 31), datetime(2026, 5, 31), 20260531):
+            self.assertIn("2.90%", ks.answer(q, as_of).text, repr(as_of))
+        for as_of in ("", "yesterday", "2026-13-45", None):
+            self.assertIn("3.40%", ks.answer(q, as_of).text, repr(as_of))   # unparseable -> latest
+
+
 class HarnessSelftest(unittest.TestCase):
     """The tiny example site that ships with the harness (a different credit union)."""
 
